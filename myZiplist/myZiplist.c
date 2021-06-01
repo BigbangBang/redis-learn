@@ -1,5 +1,7 @@
 #include "./myZiplist.h"
 
+#define redis_unreachable abort
+
 #define ZIP_END 255
 #define ZIP_BIG_PREVLEN 254
 
@@ -106,6 +108,7 @@ static inline unsigned int zipEncodingLenSize(unsigned char encoding) {
 } while (0)
 
 
+// 返回存储编码需要的字节
 static inline unsigned int zipIntSize(unsigned char encoding) {
     switch(encoding) {
     case ZIP_INT_8B:  return 1;
@@ -116,7 +119,24 @@ static inline unsigned int zipIntSize(unsigned char encoding) {
     }
     if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX)
         return 0; /* 4 bit immediate */
-    /* bad encoding, covered by a previous call to ZIP_ASSERT_ENCODING */
+    
     redis_unreachable();
     return 0;
 }
+
+
+// 在指针p执行的位置，存储encoding信息
+unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, unsigned int rawlen){
+    unsigned char len = 1, buf[5];
+
+    if(ZIP_IS_STR(encoding)) {
+        if(rawlen <= 0x3f) {
+            if(!p) return len;
+            buf[0] = ZIP_STR_06B | rawlen;
+        } else if(rawlen <= 0x3fff) {
+            len += 1;
+            buf[0] = ZIP_STR_14B | ((rawlen >> 8) & 0x3f);
+        }
+    }
+}
+
