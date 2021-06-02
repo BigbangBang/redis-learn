@@ -135,10 +135,26 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
             buf[0] = ZIP_STR_06B | rawlen;
         } else if(rawlen <= 0x3fff) {
             len += 1;
+            if(!p) return len;
             buf[0] = ZIP_STR_14B | ((rawlen >> 8) & 0x3f);
+            buf[1] = rawlen & 0xff;
+        } else {
+            len += 4;
+            if(!p) return len;
+            buf[0] = ZIP_STR_32B;
+            buf[1] = (rawlen >> 24) & 0xff;
+            buf[2] = (rawlen >> 16) & 0xff;
+            buf[3] = (rawlen >> 8) & 0xff;
+            buf[4] = rawlen & 0xff;
         }
+    }else {
+        if(!p) return len;
+        buf[0] = encoding;
     }
+
+    memcpy(p, buf, len);
+    return len;
 }
 
-// 这是一行git测试
+
 
