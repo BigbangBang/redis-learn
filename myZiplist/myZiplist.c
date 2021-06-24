@@ -129,16 +129,126 @@ static inline unsigned int zipIntSize(unsigned char encoding) {
 unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, unsigned int rawlen){
     unsigned char len = 1, buf[5];
 
-    if(ZIP_IS_STR(encoding)) {
-        if(rawlen <= 0x3f) {
-            if(!p) return len;
+    if (ZIP_IS_STR(encoding)) {
+        if (rawlen <= 0x3f) {
+            if (!p) return len;
             buf[0] = ZIP_STR_06B | rawlen;
-        } else if(rawlen <= 0x3fff) {
+        } else if (rawlen <= 0x3fff) {
             len += 1;
+            if (!p) return len;
             buf[0] = ZIP_STR_14B | ((rawlen >> 8) & 0x3f);
+            buf[1] = rawlen & 0xff;
+        } else {
+            len += 4;
+            if (!p) return len;
+            buf[0] = ZIP_STR_32B;
+            buf[1] = (rawlen >> 24) & 0xff;
+            buf[2] = (rawlen >> 16) & 0xff;
+            buf[3] = (rawlen >> 8) & 0xff;
+            buf[4] = rawlen & 0xff;
+        }
+    } else {
+        if (!p) return len;
+        buf[0] = encoding;
+    }
+
+    /* Store this length at p. */
+    memcpy(p,buf,len);
+    return len;
+}
+
+// encoding 节点的编码 lensize 编码占用长度
+// len 节点的总长度
+#define ZIP_DECODE_LENGTH(ptr, encoding, lensize, len) do {                    \
+    if ((encoding) < ZIP_STR_MASK) {                                           \
+        if ((encoding) == ZIP_STR_06B) {                                       \
+            (lensize) = 1;                                                     \
+            (len) = (ptr)[0] & 0x3f;                                           \
+        } else if ((encoding) == ZIP_STR_14B) {                                \
+            (lensize) = 2;                                                     \
+            (len) = (((ptr)[0] & 0x3f) << 8) | (ptr)[1];                       \
+        } else if ((encoding) == ZIP_STR_32B) {                                \
+            (lensize) = 5;                                                     \
+            (len) = ((ptr)[1] << 24) |                                         \
+                    ((ptr)[2] << 16) |                                         \
+                    ((ptr)[3] <<  8) |                                         \
+                    ((ptr)[4]);                                                \
+        } else {                                                               \
+            (lensize) = 0; /* bad encoding, should be covered by a previous */ \
+            (len) = 0;     /* ZIP_ASSERT_ENCODING / zipEncodingLenSize, or  */ \
+                           /* match the lensize after this macro with 0.    */ \
+        }                                                                      \
+    } else {                                                                   \
+        (lensize) = 1;                                                         \
+        if ((encoding) == ZIP_INT_8B)  (len) = 1;                              \
+        else if ((encoding) == ZIP_INT_16B) (len) = 2;                         \
+        else if ((encoding) == ZIP_INT_24B) (len) = 3;                         \
+        else if ((encoding) == ZIP_INT_32B) (len) = 4;                         \
+        else if ((encoding) == ZIP_INT_64B) (len) = 8;                         \
+        else if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX)   \
+            (len) = 0; /* 4 bit immediate */                                   \
+        else                                                                   \
+            (lensize) = (len) = 0; /* bad encoding */                          \
+    }                                                                          \
+} while(0)
+
+
+// 将前节点的长度写进p，用于比较大的节点
+int zipStorePrevEntryLengthLarge(unsigned char *p, unsigned int len) {
+    uint32_t u32;
+    if(p != NULL) {
+        p[0] = ZIP_BIG_PREVLEN;
+        u32 = len;
+        memcpy(p+1, &u32, sizeof(u32));
+        memrev32ifbe(p+1);
+    }
+    return 1+sizeof(uint32_t);
+}
+
+// 编码前置节点的长度
+unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
+    if(p == NULL) {
+        return (len < ZIP_BIG_PREVLEN) ? 1 : sizeof(uint32_t) + 1;
+    } else {
+        if( len < ZIP_BIG_PREVLEN) {
+            p[0] = len;
+            return 1;
+        } else {
+            return zipStorePrevEntryLengthLarge(p, len);
         }
     }
 }
 
-// 这是一行git测试
+
+// 返回前置节点编码的长度
+#define ZIP_DECODE_PREVLENSIZE(ptr, prevlensize) do {                          \
+    if ((ptr)[0] < ZIP_BIG_PREVLEN) {                                          \
+        (prevlensize) = 1;                                                     \
+    } else {                                                                   \
+        (prevlensize) = 5;                                                     \
+    }                                                                          \
+} while(0)
+
+// 返回前置节点的长度。
+#define ZIP_DECODE_PREVLEN(ptr, prevlensize, prevlen) do {                     \
+    ZIP_DECODE_PREVLENSIZE(ptr, prevlensize);                                  \
+    if ((prevlensize) == 1) {                                                  \
+        (prevlen) = (ptr)[0];                                                  \
+    } else { /* prevlensize == 5 */                                            \
+        (prevlen) = ((ptr)[4] << 24) |                                         \
+                    ((ptr)[3] << 16) |                                         \
+                    ((ptr)[2] <<  8) |                                         \
+                    ((ptr)[1]);                                                \
+    }                                                                          \
+} while(0)
+
+
+// 前置节点长度发生变化 返回变化后的长度 - 变化后的长度
+int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
+    unsigned int prevlensize;
+    ZIP_DECODE_PREVLENSIZE(p, prevlensize);
+    return zipStorePrevEntryLength(NULL, len) - prevlensize;
+}
+
+
 
