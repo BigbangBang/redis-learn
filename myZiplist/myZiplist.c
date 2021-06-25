@@ -250,5 +250,13 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
     return zipStorePrevEntryLength(NULL, len) - prevlensize;
 }
 
+/* 检查 'entry' 指向的字符串是否可以编码为整数。
+ * 将整数值存储在 'v' 中，并将其编码存储在 'encoding' 中。
+ */
+int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
+    long long value;
 
+    if(entrylen >= 32 || entrylen == 0) return 0;
+    return 1;
+}
 
