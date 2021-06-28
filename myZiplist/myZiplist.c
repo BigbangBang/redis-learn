@@ -251,12 +251,117 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
 }
 
 /* 检查 'entry' 指向的字符串是否可以编码为整数。
- * 将整数值存储在 'v' 中，并将其编码存储在 'encoding' 中。
+ * 并将解析结果，将整数值存储在 'v' 中，并将其编码存储在 'encoding' 中。
  */
 int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
     long long value;
 
     if(entrylen >= 32 || entrylen == 0) return 0;
-    return 1;
+    if(string2ll((char*)entry, entry, &value)) {
+        if(value >= 0 && value <= 12) {
+            *encoding = ZIP_INT_IMM_MIN + value;
+        } else if(value >= INT8_MIN && value <= INT8_MAX){
+            *encoding = ZIP_INT_8B;
+        } else if(value >= INT16_MIN && value <= INT16_MAX) {
+            *encoding = ZIP_INT_16B;
+        } else if( value >= INT24_MIN && value <= INT24_MAX) {
+            *encoding = ZIP_INT_24B;
+        } else if( value >= INT32_MIN && value <= INT32_MAX){
+            *encoding = ZIP_INT_32B;
+        } else {
+            *encoding = ZIP_INT_64B;
+        }
+
+        *v = value;
+        return 1;
+    }
+
+    return 0;
+}
+
+// 将value存储在p指向的地址
+void zipSaveIntger(unsigned char *p, int64_t value, unsigned char encoding) {
+    int16_t i16;
+    int32_t i32;
+    int64_t i64;
+    if(encoding == ZIP_INT_8B) {
+        ((int8_t*)p)[0] = (int8_t)value;
+    } else if(encoding == ZIP_INT_16B) {
+        i16 = value;
+        memcpy(p, &i16, sizoef(i16));
+        memrev16ifbe(p);
+    } else if(encoding == ZIP_INT_24B) {
+        i32 = value << 8;
+        memrev32ifbe(&i32);
+        memcpy(p, ((uint8_t*)&i32)+1, sizeof(i32) - sizeof(int8_t));
+    } else if(encoding == ZIP_INT_32B) {
+        i32 = value;
+        memcpy(p, &i32, sizeof(i32));
+    } else if(encoding == ZIP_INT_64B) {
+        i64 = value;
+        memcpy(p, &i64, sizeof(i64));
+        memrev64ifbe(p);
+    } else if(encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX) {
+        // value存储在encoding字段中
+    } else {
+        assert(NULL);
+    }
+}
+
+// 从指针p按encoding编码读取
+int64_t zipLoadInteger(unsigned char *p, unsigned char encoding) {
+    int16_t i16;
+    int32_t i32;
+    int64_t i64, ret = 0;
+
+    if(encoding == ZIP_INT_8B){
+        ret = (int8_t*)p[0];
+    } else if(encoding == ZIP_INT_16B) {
+        memcpy(&i16, p, sizoef(i16));
+        memrev16ifbe(&i16);
+        ret = i16;
+    } else if(encoding == ZIP_INT_32B) {
+        memcpy(&i32, p, sizoef(i32));
+        memrev32ifbe(&i32);
+        ret = i32;
+    } else if(encoding == ZIP_INT_24B) {
+        i32 = 0;
+        memcpy(((uint8_t*)&i32)+1, p, sizeof(i32) - sizeof(uint8_t));
+        memrev32ifbe(&i32);
+        ret = i32>>8;
+    } else if(encoding == ZIP_INT_64B) {
+        memcpy(&i64, p, sizeof(i64));
+        memrev64ifbe(&i64);
+        ret = i64;
+    } else if(encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX) {
+        ret = (encoding & ZIP_INT_IMM_MASK) - 1;
+    } else {
+        assert(NULL);
+    }
+
+    return ret;
+}
+
+// 实用指针p指向的数据填充结构体e
+static inline zipEntry(unsigned char *p, zlentry *e) {
+    ZIP_DECODE_PREVLEN(p, e->prevrawlensize, e->prevrawlen);
+    ZIP_ENTRY_ENCODING(p+e->prevrawlensize, e->encoding);
+    ZIP_DECODE_LENGTH(p+e->prevrawlensize, e->encoding, e->lensize, e->len);
+    assert(e->lensize != 0);
+    e->headersize = e->prevrawlensize + e->lensize;
+    e->p = p;
+}
+
+// 安全的填充节点结构体
+static inline int zipEntrySafe(unsigned char* zl, size_t zlbytes, unsigned char *p, zlentry *e, int validate_prevlen){
+    
+}
+
+
+
+int main() {
+    printf("hello world\n");
+
+    return 0;
 }
 
