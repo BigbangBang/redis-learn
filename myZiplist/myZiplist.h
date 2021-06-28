@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
+#include "utils.h"
 
 
 #define MY_ZIPLIST_HEAD 0
