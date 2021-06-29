@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <limits.h>
+#include <stdlib.h>
 
 /* Toggle the 16 bit unsigned integer pointed by *p from little endian to
  * big endian */
@@ -26,6 +27,7 @@ void memrev32(void *p) {
     x[1] = x[2];
     x[2] = t;
 }
+
 
 /* Toggle the 64 bit unsigned integer pointed by *p from little endian to
  * big endian */
@@ -125,6 +127,12 @@ int string2ll(const char *s, size_t slen, long long *value) {
         if (value != NULL) *value = v;
     }
     return 1;
+}
+
+void *zmalloc(size_t size) {
+    size_t realsize = size > 0 ? size : sizeof(long);
+    void *ptr = malloc(realsize);
+    return ptr;
 }
 
 #endif

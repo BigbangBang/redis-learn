@@ -38,7 +38,7 @@
 // 是否是字符串类型节点
 #define ZIP_IS_STR(enc) (((enc) & ZIP_STR_MASK) < ZIP_STR_MASK)
 // ziplist占用字节数
-#define ZIPLIST_BYTES(zl) (*((uint32_t)(zl)))
+#define ZIPLIST_BYTES(zl) (*((uint32_t*)(zl)))
 // 获取最后一个节点地址
 #define ZIPLIST_TAIL_OFFSET(zl) (*((uint32_t*)((zl)+sizeof(uint32_t))))
 // 获取压缩列表的长度
@@ -46,7 +46,7 @@
 // 压缩类表头的长度 
 #define ZIPLIST_HEADER_SIZE (sizeof(uint32_t)*2+sizeof(uint16_t))
 // 尾部的长度
-#define ZIPLIST_END_SIZE (sizeof(uint_8))
+#define ZIPLIST_END_SIZE (sizeof(uint8_t))
 // 首个节点的位置
 #define ZIPLIST_ENTRY_HAED(zl) (zl+ZIPLIST_HEADER_SIZE)
 //指向最后一个节点的指针 
@@ -354,9 +354,88 @@ static inline zipEntry(unsigned char *p, zlentry *e) {
 
 // 安全的填充节点结构体
 static inline int zipEntrySafe(unsigned char* zl, size_t zlbytes, unsigned char *p, zlentry *e, int validate_prevlen){
-    
+    unsigned char *zlfirst = zl + ZIPLIST_HEADER_SIZE;
+    unsigned char *zllast = zl + zlbytes - ZIPLIST_END_SIZE;
+#define OUT_OF_RANGE(p) (unlikely((p) < zlfirst || (p) > zllast))
+
+    /* If threre's no possibility for the header to reach outside the ziplist,
+     * take the fast path. (max lensize and prevrawlensize are both 5 bytes) */
+    if (p >= zlfirst && p + 10 < zllast) {
+        ZIP_DECODE_PREVLEN(p, e->prevrawlensize, e->prevrawlen);
+        ZIP_ENTRY_ENCODING(p + e->prevrawlensize, e->encoding);
+        ZIP_DECODE_LENGTH(p + e->prevrawlensize, e->encoding, e->lensize, e->len);
+        e->headersize = e->prevrawlensize + e->lensize;
+        e->p = p;
+        /* We didn't call ZIP_ASSERT_ENCODING, so we check lensize was set to 0. */
+        if (unlikely(e->lensize == 0))
+            return 0;
+        /* Make sure the entry doesn't rech outside the edge of the ziplist */
+        if (OUT_OF_RANGE(p + e->headersize + e->len))
+            return 0;
+        /* Make sure prevlen doesn't rech outside the edge of the ziplist */
+        if (validate_prevlen && OUT_OF_RANGE(p - e->prevrawlen))
+            return 0;
+        return 1;
+    }
+
+    /* Make sure the pointer doesn't rech outside the edge of the ziplist */
+    if (OUT_OF_RANGE(p))
+        return 0;
+
+    /* Make sure the encoded prevlen header doesn't reach outside the allocation */
+    ZIP_DECODE_PREVLENSIZE(p, e->prevrawlensize);
+    if (OUT_OF_RANGE(p + e->prevrawlensize))
+        return 0;
+
+    /* Make sure encoded entry header is valid. */
+    ZIP_ENTRY_ENCODING(p + e->prevrawlensize, e->encoding);
+    e->lensize = zipEncodingLenSize(e->encoding);
+    if (unlikely(e->lensize == ZIP_ENCODING_SIZE_INVALID))
+        return 0;
+
+    /* Make sure the encoded entry header doesn't reach outside the allocation */
+    if (OUT_OF_RANGE(p + e->prevrawlensize + e->lensize))
+        return 0;
+
+    /* Decode the prevlen and entry len headers. */
+    ZIP_DECODE_PREVLEN(p, e->prevrawlensize, e->prevrawlen);
+    ZIP_DECODE_LENGTH(p + e->prevrawlensize, e->encoding, e->lensize, e->len);
+    e->headersize = e->prevrawlensize + e->lensize;
+
+    /* Make sure the entry doesn't rech outside the edge of the ziplist */
+    if (OUT_OF_RANGE(p + e->headersize + e->len))
+        return 0;
+
+    /* Make sure prevlen doesn't rech outside the edge of the ziplist */
+    if (validate_prevlen && OUT_OF_RANGE(p - e->prevrawlen))
+        return 0;
+
+    e->p = p;
+    return 1;
+#undef OUT_OF_RANGE
 }
 
+static inline unsigned zipRawEntryLengthSafe(unsigned char* zl, size_t zlbytes, unsigned char *p) {
+    zlentry e;
+    assert(zipEntrySafe(zl, zlbytes, p, &e, 0));
+    return e.headersize + e.len;
+}
+
+static inline void zipAssertValidEntry(unsigned char* zl, size_t zlbytes, unsigned char *p) {
+    zlentry e;
+    assert(zipEntrySafe(zl, zlbytes, p, &e, 1));
+}
+
+// 创建一个空的ziplist
+unsigned char *ziplistNew(void) {
+    unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE;
+    unsigned char *zl = zmalloc(bytes);
+    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes);
+    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE);
+    ZIPLIST_LENGTH(zl) = 0;
+    zl[bytes-1] = ZIP_END;
+    return zl;
+}
 
 
 int main() {
