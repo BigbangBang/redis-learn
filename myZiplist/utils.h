@@ -132,7 +132,20 @@ int string2ll(const char *s, size_t slen, long long *value) {
 void *zmalloc(size_t size) {
     size_t realsize = size > 0 ? size : sizeof(long);
     void *ptr = malloc(realsize);
+    assert(ptr != NULL);
     return ptr;
+}
+
+void *zrealloc(void *ptr, size_t size) {
+    zfree(ptr);
+    ptr = realloc(ptr, size);
+    return ptr;
+}
+
+void zfree(void *ptr) {
+    if(ptr == NULL) return;
+
+    free(ptr);
 }
 
 #endif
