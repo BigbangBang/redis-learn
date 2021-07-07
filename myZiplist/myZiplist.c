@@ -609,16 +609,22 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     // 存储p相对于压缩列表开始的位置，因为需要重新申请内存
     offset = p-zl;
     newlen = curlen+reqlen+nextdiff;
+    // 如果nextidff== -4，并且reqlen<4会导致，压缩列表重新申请的内存比源内存小，破坏压缩列表的结构 
     zl = ziplistResize(zl,newlen);
     p = zl+offset;
 
     /* Apply memory move when necessary and update tail offset. */
     if (p[0] != ZIP_END) {
         /* Subtract one because of the ZIP_END bytes */
+        // memcopy不能拷贝有重叠区域的两块内存
+        // memmove在进行copy的时候，会对拷贝的数据做检查，发现有重叠的内存时，会从另一个方向拷贝
+        // p-nextdiff 并不会修改源p前置节点的数据，只是扩大了p节点的空间（nextdiff>0）
         memmove(p+reqlen,p-nextdiff,curlen-offset-1+nextdiff);
 
         /* Encode this entry's raw length in the next entry. */
         if (forcelarge)
+            // 由于新增节点长度小于4，且p指向节点前置节点长度大于254，为了使插入新节点后，p指向节点数据的正确性，
+            // p节点pre_entry_len强行实用大的前置节点数据（因为p节点在插入新节点时，内存空间没有发生变化）
             zipStorePrevEntryLengthLarge(p+reqlen,reqlen);
         else
             zipStorePrevEntryLength(p+reqlen,reqlen);
