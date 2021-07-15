@@ -457,7 +457,7 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
 
     /* Empty ziplist */
     if (p[0] == ZIP_END) return zl;
-
+    //在插入或者删除时 保证了p指向节点的完整性
     zipEntry(p, &cur); /* no need for "safe" variant since the input pointer was validated by the function that returned it. */
     firstentrylen = prevlen = cur.headersize + cur.len;
     prevlensize = zipStorePrevEntryLength(NULL, prevlen);
@@ -465,6 +465,7 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     p += prevlen;
 
     /* Iterate ziplist to find out how many extra bytes do we need to update it. */
+    // 迭代压缩列表查找级连更新需要扩展的字节数
     while (p[0] != ZIP_END) {
         assert(zipEntrySafe(zl, curlen, p, &cur, 0));
 
@@ -487,11 +488,13 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
         assert(cur.prevrawlen == 0 || cur.prevrawlen + delta == prevlen);
 
         /* Update prev entry's info and advance the cursor. */
+        // 更新prevlen和prevlensize的大小
         rawlen = cur.headersize + cur.len;
         prevlen = rawlen + delta; 
         prevlensize = zipStorePrevEntryLength(NULL, prevlen);
         prevoffset = p - zl;
         p += rawlen;
+        // 增加需要额外增加的内存空间
         extra += delta;
         cnt++;
     }
@@ -500,15 +503,19 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     if (extra == 0) return zl;
 
     /* Update tail offset after loop. */
+    // 更新压缩列表尾节点的偏移量
     if (tail == zl + prevoffset) {
         /* When the the last entry we need to update is also the tail, update tail offset
          * unless this is the only entry that was updated (so the tail offset didn't change). */
+        // 需要更新的最后一个节点是尾节点时，判断如果只有一个节点更新，就不改变压缩列表尾节点偏移量的值
         if (extra - delta != 0) {
             ZIPLIST_TAIL_OFFSET(zl) =
                 intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+extra-delta);
+                // -delta 减去尾节点内存需要增加的字节数  
         }
     } else {
         /* Update the tail offset in cases where the last entry we updated is not the tail. */
+        // 更新压缩列表尾节点的偏移量
         ZIPLIST_TAIL_OFFSET(zl) =
             intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+extra);
     }
@@ -520,12 +527,15 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     p = zl + offset;
     memmove(p + extra, p, curlen - offset - 1);
     p += extra;
+    // p指向未发生改变的节点位置
 
     /* Iterate all entries that need to be updated tail to head. */
+    // 从尾部向头部遍历，更新节点的大小
     while (cnt) {
         zipEntry(zl + prevoffset, &cur); /* no need for "safe" variant since we already iterated on all these entries above. */
         rawlen = cur.headersize + cur.len;
         /* Move entry to tail and reset prevlen. */
+        // 扩展每一个需要改变节点的内存空间
         memmove(p - (rawlen - cur.prevrawlensize), 
                 zl + prevoffset + cur.prevrawlensize, 
                 rawlen - cur.prevrawlensize);
@@ -619,6 +629,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         // memcopy不能拷贝有重叠区域的两块内存
         // memmove在进行copy的时候，会对拷贝的数据做检查，发现有重叠的内存时，会从另一个方向拷贝
         // p-nextdiff 并不会修改源p前置节点的数据，只是扩大了p节点的空间（nextdiff>0）
+        // 这次memmove操作会扩大或缩小p节点愿内存空间
         memmove(p+reqlen,p-nextdiff,curlen-offset-1+nextdiff);
 
         /* Encode this entry's raw length in the next entry. */
@@ -636,6 +647,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         /* When the tail contains more than one entry, we need to take
          * "nextdiff" in account as well. Otherwise, a change in the
          * size of prevlen doesn't have an effect on the *tail* offset. */
+
         assert(zipEntrySafe(zl, newlen, p+reqlen, &tail, 1));
         if (p[reqlen+tail.headersize+tail.len] != ZIP_END) {
             ZIPLIST_TAIL_OFFSET(zl) =
@@ -648,6 +660,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
 
     /* When nextdiff != 0, the raw length of the next entry has changed, so
      * we need to cascade the update throughout the ziplist */
+    //插入新节点后，p指向节点数据发生变化，需要在整个压缩列表中进行级联更新
     if (nextdiff != 0) {
         offset = p-zl;
         zl = __ziplistCascadeUpdate(zl,p+reqlen);
@@ -655,6 +668,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     }
 
     /* Write the entry */
+    //在p出插入新的几点
     p += zipStorePrevEntryLength(p,prevlen);
     p += zipStoreEntryEncoding(p,encoding,slen);
     if (ZIP_IS_STR(encoding)) {
