@@ -680,6 +680,36 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     return zl;
 }
 
+unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int num) {
+    unsigned int i, totlen, deleted=0;
+    size_t offset;
+    int nextdiff = 0;
+    zlentry first, tail;
+    size_t zlbytes = intrev32ifbe(ZIPLIST_BYTES(zl));
+
+    zipEntry(p, &first);
+    for(i = 0; p[0] != ZIP_END && i < num; i++){
+        p += zipRawEntryLengthSafe(zl, zlbytes, p);
+        deleted++;
+    }
+
+    assert(p >= first.p);
+    totlen = p-first.p;
+    if(totlen > 0){
+        uint32_t set_tail;
+        if(p[0] != ZIP_END) {
+            
+            nextdiff = zipPrevLenByteDiff(p, first.prevrawlen);
+
+            p -= nextdiff;
+            assert(p >= first.p && p<zl+zlbytes-1);
+
+        }
+    }
+
+
+}
+
 int main() {
     printf("hello world\n");
 
