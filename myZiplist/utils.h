@@ -5,6 +5,8 @@
 #include <limits.h>
 #include <stdlib.h>
 
+void zfree(void *ptr);
+
 /* Toggle the 16 bit unsigned integer pointed by *p from little endian to
  * big endian */
 void memrev16(void *p) {
@@ -138,8 +140,9 @@ void *zmalloc(size_t size) {
 
 void *zrealloc(void *ptr, size_t size) {
     zfree(ptr);
-    ptr = realloc(ptr, size);
-    return ptr;
+    void * new_ptr;
+    new_ptr = realloc(ptr, size);
+    return new_ptr;
 }
 
 void zfree(void *ptr) {

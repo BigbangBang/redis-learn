@@ -1,5 +1,8 @@
 #include "./myZiplist.h"
 
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 #define redis_unreachable abort
 
 #define ZIP_END 255
@@ -48,14 +51,14 @@
 // 尾部的长度
 #define ZIPLIST_END_SIZE (sizeof(uint8_t))
 // 首个节点的位置
-#define ZIPLIST_ENTRY_HAED(zl) (zl+ZIPLIST_HEADER_SIZE)
+#define ZIPLIST_ENTRY_HEAD(zl) (zl+ZIPLIST_HEADER_SIZE)
 //指向最后一个节点的指针 
 #define ZIPLIST_ENTRY_TAIL(zl) ((zl)+intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl)))
 //指向ziplist最后一个字节的指针
 #define ZIPLIST_ENTRY_END(zl) ((zl)+intrev32ifbe(ZIPLIST_BYTES(zl))-1)
 
 //增加压缩列表的长度
-#define ZIPLIST_INCE_LENGTH(zl, ince){ \
+#define ZIPLIST_INCR_LENGTH(zl, incr){ \
     if (ZIPLIST_LENGTH(zl) < UINT16_MAX) \
         ZIPLIST_LENGTH(zl) = intrev16ifbe(intrev16ifbe(ZIPLIST_LENGTH(zl))+incr); \
 }
@@ -473,6 +476,7 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
         if (cur.prevrawlen == prevlen) break;
 
         /* Abort when entry's "prevlensize" is big enough. */
+        // 当前节点的前置节点的存储长度大于等于存储前置节点长度需要的字节数
         if (cur.prevrawlensize >= prevlensize) {
             if (cur.prevrawlensize == prevlensize) {
                 zipStorePrevEntryLength(p, prevlen);
@@ -680,6 +684,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     return zl;
 }
 
+// 删除节点
 unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int num) {
     unsigned int i, totlen, deleted=0;
     size_t offset;
@@ -698,20 +703,97 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
     if(totlen > 0){
         uint32_t set_tail;
         if(p[0] != ZIP_END) {
-            
-            nextdiff = zipPrevLenByteDiff(p, first.prevrawlen);
 
+            nextdiff = zipPrevLenByteDiff(p, first.prevrawlen);
+            // 修改p指向节点需要增加或减少长度后的位置
             p -= nextdiff;
             assert(p >= first.p && p<zl+zlbytes-1);
+            zipStorePrevEntryLength(p, first.prevrawlen);
+            set_tail = intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl)) - totlen;
+            assert(zipEntrySafe(zl, zlbytes, p, &tail, 1));
+            if(p[tail.headersize+tail.len] != ZIP_END) {
+                set_tail = set_tail + nextdiff;
+            }
 
+            size_t bytes_to_move = zlbytes-(p-zl)-1;
+            memmove(first.p, p, bytes_to_move);
+        } else {
+            set_tail = (first.p-zl)-first.prevrawlen;
+        }
+        offset = first.p - zl;
+        zlbytes -= totlen - nextdiff;
+        zl = ziplistResize(zl, zlbytes);
+        p = zl+offset;
+
+        ZIPLIST_INCR_LENGTH(zl,-deleted);
+
+        assert(set_tail <= zlbytes - ZIPLIST_END_SIZE);
+        ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(set_tail);
+
+        if(nextdiff != 0) {
+            zl = __ziplistCascadeUpdate(zl,p);
         }
     }
 
+    return zl;
+}
+
+unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where) {
+    unsigned char *p;
+    p = (where == ZIPLIST_HEAD) ? ZIPLIST_ENTRY_HEAD(zl) : ZIPLIST_ENTRY_END(zl);
+    return __ziplistInsert(zl,p,s,slen);
+}
+
+unsigned char *ziplistIndex(unsigned char *zl, int index) {
+    unsigned char *p;
+    unsigned int prevlensize, prevlen = 0;
+    size_t zlbytes = intrev32ifbe(ZIPLIST_BYTES(zl));
+    if (index < 0) {
+        index = (-index)-1;
+        p = ZIPLIST_ENTRY_TAIL(zl);
+        if (p[0] != ZIP_END) {
+            /* No need for "safe" check: when going backwards, we know the header
+             * we're parsing is in the range, we just need to assert (below) that
+             * the size we take doesn't cause p to go outside the allocation. */
+            ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
+            while (prevlen > 0 && index--) {
+                p -= prevlen;
+                assert(p >= zl + ZIPLIST_HEADER_SIZE && p < zl + zlbytes - ZIPLIST_END_SIZE);
+                ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
+            }
+        }
+    } else {
+        p = ZIPLIST_ENTRY_HEAD(zl);
+        while (index--) {
+            /* Use the "safe" length: When we go forward, we need to be careful
+             * not to decode an entry header if it's past the ziplist allocation. */
+            p += zipRawEntryLengthSafe(zl, zlbytes, p);
+            if (p[0] == ZIP_END)
+                break;
+        }
+    }
+    if (p[0] == ZIP_END || index > 0)
+        return NULL;
+    zipAssertValidEntry(zl, zlbytes, p);
+    return p;
 
 }
 
+
+static unsigned char *createList() {
+    unsigned char *zl = ziplistNew();
+    zl = ziplistPush(zl, (unsigned char*)"foo", 3, ZIPLIST_TAIL);
+    // zl = ziplistPush(zl, (unsigned char*)"quux", 4, ZIPLIST_TAIL);
+    // zl = ziplistPush(zl, (unsigned char*)"hello", 5, ZIPLIST_HEAD);
+    // zl = ziplistPush(zl, (unsigned char*)"1024", 4, ZIPLIST_TAIL);
+    return zl;
+}
+
+
 int main() {
     printf("hello world\n");
+
+    unsigned char *p = createList();
 
     return 0;
 }

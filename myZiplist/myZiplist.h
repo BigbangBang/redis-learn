@@ -9,8 +9,8 @@
 #include "utils.h"
 
 
-#define MY_ZIPLIST_HEAD 0
-#define MY_ZIPLIST_TAIL 1
+#define ZIPLIST_HEAD 0
+#define ZIPLIST_TAIL 1
 
 typedef struct {
     unsigned char *sval;
@@ -21,7 +21,7 @@ typedef struct {
 unsigned char *ziplistNew();
 unsigned char *ziplistMerge(unsigned char **frist, unsigned char **second);
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where);
-unsigned char *ziplistIndex(unsigned char *zl, unsigned char *p);
+unsigned char *ziplistIndex(unsigned char *zl, int index);
 unsigned char *ziplistNext(unsigned char *zl, unsigned char *p);
 unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p);
 unsigned int ziplistGet(unsigned char *p, unsigned char **sval, unsigned int *slen, long long *lval);
